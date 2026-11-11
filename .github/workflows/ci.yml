@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test
+        working-directory: backend
+        run: go test -race ./...
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: flashcart
+          POSTGRES_USER: flashcart
+          POSTGRES_PASSWORD: flashcart
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U flashcart -d flashcart"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Prepare database
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://flashcart:flashcart@localhost:5433/flashcart?sslmode=disable
+        run: |
+          go run ./cmd/flashcart migrate
+          go run ./cmd/flashcart seed
+      - name: Start API and storefront
+        env:
+          DATABASE_URL: postgres://flashcart:flashcart@localhost:5433/flashcart?sslmode=disable
+          APP_ENV: local
+          APP_ORIGIN: http://localhost:5173
+          PORT: 8080
+        run: |
+          (cd backend && go run ./cmd/flashcart serve > /tmp/flashcart-api.log 2>&1 &)
+          (cd frontend && npm run dev -- --host 0.0.0.0 > /tmp/flashcart-web.log 2>&1 &)
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz >/dev/null && curl --fail --silent http://localhost:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/flashcart-api.log /tmp/flashcart-web.log
+          exit 1
+      - name: Browser and accessibility tests
+        working-directory: frontend
+        env:
+          BASE_URL: http://localhost:5173
+        run: npm run test:e2e
