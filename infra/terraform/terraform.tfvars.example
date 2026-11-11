@@ -1,0 +1,8 @@
+project_id     = "your-gcp-project-id"
+region         = "southamerica-east1"
+image          = "southamerica-east1-docker.pkg.dev/your-gcp-project-id/flashcart/flashcart@sha256:replace-with-image-digest"
+app_origin     = "https://replace-after-first-apply.run.app"
+database_tier  = "db-f1-micro"
+enable_gemini   = false
+deletion_protection = true
+

@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: flashcart
+      POSTGRES_USER: flashcart
+      POSTGRES_PASSWORD: flashcart
+    ports: ["5433:5432"]
+    volumes: ["flashcart-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flashcart -d flashcart"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: ["gcloud", "beta", "emulators", "pubsub", "start", "--host-port=0.0.0.0:8085"]
+    ports: ["8085:8085"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  pubsub-init:
+    image: curlimages/curl:8.12.1
+    depends_on:
+      pubsub:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until curl -fsS http://pubsub:8085/v1/projects/flashcart-local/topics >/dev/null 2>&1; do sleep 1; done
+        create_or_keep() {
+          status=$$(curl -sS -o /dev/null -w '%{http_code}' "$$@")
+          [ "$$status" = "200" ] || [ "$$status" = "409" ]
+        }
+        create_or_keep -X PUT http://pubsub:8085/v1/projects/flashcart-local/topics/flashcart-events -H 'Content-Type: application/json' -d '{}'
+        create_or_keep -X PUT http://pubsub:8085/v1/projects/flashcart-local/subscriptions/flashcart-events-push -H 'Content-Type: application/json' -d '{"topic":"projects/flashcart-local/topics/flashcart-events","pushConfig":{"pushEndpoint":"http://host.docker.internal:8081/"}}'
+
+volumes:
+  flashcart-db:
+
