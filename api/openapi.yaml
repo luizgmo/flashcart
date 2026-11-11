@@ -1,0 +1,141 @@
+openapi: 3.1.0
+info:
+  title: FlashCart API
+  version: 0.1.0
+  description: API da demonstração de vendas relâmpago. Nenhum pagamento real é processado.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Health check do processo
+      responses:
+        '200': { description: Processo ativo }
+  /readyz:
+    get:
+      summary: Verifica conexão com PostgreSQL
+      responses:
+        '200': { description: Pronto }
+        '503': { description: Dependência indisponível }
+  /api/v1/config:
+    get:
+      summary: Configuração pública da demonstração
+      responses:
+        '200': { description: Configuração pública }
+  /api/v1/session:
+    post:
+      summary: Cria ou recupera sessão anônima
+      parameters:
+        - in: header
+          name: Origin
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201': { description: Sessão criada }
+        '200': { description: Sessão já existente }
+        '403': { description: Origem não permitida }
+  /api/v1/products:
+    get:
+      summary: Lista produtos disponíveis
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 24, default: 12 }
+        - in: query
+          name: category
+          schema: { type: string }
+      responses:
+        '200': { description: Página de produtos }
+        '400': { description: Consulta inválida }
+  /api/v1/products/{id}:
+    get:
+      summary: Detalha um produto
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Produto }
+        '404': { description: Produto não encontrado }
+  /api/v1/orders:
+    get:
+      summary: Lista pedidos da sessão atual
+      responses:
+        '200': { description: Pedidos da sessão }
+        '401': { description: Sessão necessária }
+    post:
+      summary: Cria pedido e reserva estoque por cinco minutos
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [product_id, quantity]
+              properties:
+                product_id: { type: string, format: uuid }
+                quantity: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        '201': { description: Pedido criado }
+        '200': { description: Replay idempotente }
+        '401': { description: Sessão necessária }
+        '409': { description: Estoque indisponível ou chave conflitante }
+  /api/v1/orders/{id}:
+    get:
+      summary: Detalha pedido pertencente à sessão atual
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Detalhe do pedido }
+        '404': { description: Pedido não encontrado }
+  /api/v1/orders/{id}/simulate-payment:
+    post:
+      summary: Simula confirmação do pagamento
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Pedido pago ou replay }
+        '409': { description: Reserva expirada }
+  /api/v1/orders/{id}/assistant:
+    post:
+      summary: Explica o status do pedido da sessão atual
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [question]
+              properties:
+                question: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200': { description: Explicação com snapshot da consulta }
+        '404': { description: Pedido não encontrado nesta sessão }
+        '429': { description: Limite de uso do assistente atingido }
